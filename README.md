@@ -24,9 +24,10 @@ The proposed **EO-Pattern** layer combines:
 │   ├── Synthetic/              # Separation beyond clique expansion
 │   ├── pyproject.toml
 │   └── README.md               # Detailed experimental documentation
-├── surveys/
+├── docs/
 │   ├── Survey_of_Random_Walk_Variants_on_Graphs_and_Their_Natural_Lifts_to_Higher_Order_Structures.pdf
-│   └── Survey_of_higher_order_structures_used_in_graph_learning_and_the_associated_message_passing_frameworks.pdf
+│   ├── Survey_of_higher_order_structures_used_in_graph_learning_and_the_associated_message_passing_frameworks.pdf
+│   └── Updated_TFG_Matemáticas_Public.pdf
 └── README.md
 ```
 
