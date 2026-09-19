@@ -3,8 +3,8 @@ eompp.node_training
 ===================
 
 Training utilities for the node-classification experiments (Benchmark and
-Complementarity): tensor conversion, the EO-E chi shuffle, evaluation, and
-the full-batch training loop with early stopping on validation accuracy.
+Complementarity): tensor conversion, the shuffled-chi controls, evaluation,
+and the full-batch training loop with early stopping on validation accuracy.
 """
 
 import numpy as np
@@ -41,23 +41,29 @@ def to_tensors(data, device):
         x=torch.tensor(data["x"], dtype=torch.float32),
         y=torch.tensor(data["y"], dtype=torch.long),
         edge_index=edge_index,
-        p_ee=torch.tensor(data["p_ee"], dtype=torch.float32),
-        chi=torch.tensor(data["chi"], dtype=torch.float32),
         deg=deg,
         incidence=incidence,
         incidence_t=incidence_t,
         he_deg=he_deg,
         node_deg_hg=node_deg_hg,
     )
+    for k, v in data["p"].items():                 # p_en, p_ee, p_we
+        batch["p_" + k.lower()] = torch.tensor(v, dtype=torch.float32)
+    for k, v in data["chi"].items():               # chi_ee, chi_we
+        batch["chi_" + k.lower()] = torch.tensor(v, dtype=torch.float32)
     return {k: v.to(device) for k, v in batch.items()}
 
-def shuffled_chi(batch, seed):
-    """Return a copy of `batch` with chi rows globally permuted (variant E)."""
+def shuffled_chi(batch, key, seed):
+    """Return a copy of `batch` with the rows of `key` globally permuted.
+
+    Used by the shuffled-chi negative controls (variants E and H); `key` is
+    "chi_ee" or "chi_we".
+    """
 
     g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(batch["chi"].size(0), generator=g)
+    perm = torch.randperm(batch[key].size(0), generator=g)
     new = dict(batch)
-    new["chi"] = batch["chi"][perm.to(batch["chi"].device)]
+    new[key] = batch[key][perm.to(batch[key].device)]
     return new
 
 

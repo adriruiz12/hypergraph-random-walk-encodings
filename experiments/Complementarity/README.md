@@ -1,157 +1,190 @@
-# Experiment 3 - Complementarity (P/Q/R synthetic)
+# Experiments 4 and 5 - Complementarity
 
-A controlled synthetic experiment that isolates the one regime the other two
-experiments never reach: a task where **both** hypergraph-derived ingredients
-of the EO-Pattern layer are *simultaneously* load-bearing.
+This folder holds two mirror-image gadgets, each isolating the one regime
+the other experiments never reach: a task where **both** hypergraph-derived
+ingredients of a Pattern layer are simultaneously load-bearing.
 
-## Why this experiment exists
+* `pqr.py`    - built against the **EE** factorization `(P^EE, χ^EE)`.
+* `pqr_we.py` - built against the **WE** factorization `(P^WE, χ^WE)`.
 
-The two other experiments each leave one ingredient inert:
+Running both is the point: a gadget built against one factorization is not
+neutral with respect to the other paradigm's kernel, so neither experiment
+alone can support a general complementarity claim. Read together, they show
+that complementarity is a property of the *chosen factorization*, not of
+the hypergraph information itself (Proposition "Pairwise information
+equivalence" in the accompanying note).
 
-* **Synthetic twin** - with constant node features, any row-stochastic weight
-  (uniform mean or `P^EE`) is inert, so only `chi` (consumed by ψ as a feature)
-  can discriminate; `P^EE`-only sits at chance. (`P^EE` itself does differ
-  between the twins; it is just unusable on featureless nodes.)
-* **Real co-citation benchmark** - the structured assignment of `chi` provides
-  no observable benefit (`EO-E ≈ EO-D`), while `P^EE` yields at most a small
-  gain over the EO-A baseline.
+`pqr_we.py --m-decoys 2` is a dilution control: the WE gadget attaches more
+filler mass per target than the EE gadget by default (`m=4`), so the
+informative neighbour carries a smaller share of the aggregation weight.
+The control repeats the experiment at matched dilution (`m=2`), fixed by an
+analytical computation, not chosen from the results.
 
-So neither experiment validates the *combination*. This one does, by
-construction: it builds a task where `P^EE` alone and `chi` alone each lose
-part of the relevant information, while their joint signature identifies the
-informative neighbour.
+## Experiment 4: the EE gadget (`pqr.py`)
 
-## The P/Q/R gadget
+For every target node `v`: one informative neighbour `Q`, connected through
+two size-3 hyperedges; `m` decoys of type `P`, each through one size-2
+hyperedge; `m` decoys of type `R`, each through one size-3 hyperedge;
+neutral fillers complete the hyperedges.
 
-Recall the two quantities and what each normalisation destroys:
+| neighbour | construction | `Z^EE_vu` | `c_vu` |
+|---|---|---|---|
+| **P** | one size-2 hyperedge | 1 | 1 |
+| **Q** | two size-3 hyperedges | 1 | 2 |
+| **R** | one size-3 hyperedge | 1/2 | 1 |
 
-```
-Z[v,u]      = sum_{e in E(v,u)} 1/(|e|-1)      (raw connection mass)
-P^EE(v,u)   = Z[v,u] / d_H(v)                  (normalised by degree -> loses absolute cardinality)
-chi_vu      = (binned Z) / Z[v,u]              (normalised by Z -> loses magnitude / multiplicity)
-```
+`χ^EE` separates P from `{Q, R}` (different cardinality) but not Q from R
+(same cardinality, so same bin). `P^EE` (via `Z^EE`) separates R from
+`{P, Q}` (different mass) but not P from Q. Only the pair `(Z^EE, χ^EE)`
+jointly singles out Q. `Q`'s feature carries the true label of `v`; `P` and
+`R` are decoys with random labels.
 
-For every target node `v` we attach three neighbour types:
+`K := max_e |e| = 3` (only cardinalities 2 and 3 occur), resolved
+automatically.
 
-| neighbour |                  construction                  | Z[v,·] | chi |
-|-----------|------------------------------------------------|--------|-----|
-|   **P**   |         one size-2 hyperedge `{v, uP}`         |    1   |  e2 |
-|   **Q**   | two size-3 hyperedges `{v,uQ,x1}`, `{v,uQ,x2}` |    1   |  e3 |
-|   **R**   |       one size-3 hyperedge `{v, uR, x3}`       |   1/2  |  e3 |
+### Results
 
-* `chi` separates **P** from `{Q, R}` (e2 vs e3) but **not** Q from R - its
-  normalisation erases the multiplicity that distinguishes them, so
-  `chi_{v,uQ} = chi_{v,uR} = e3`.
-* `P^EE` separates **R** from `{P, Q}` because `Z_R = 1/2`, whereas
-  `Z_P = Z_Q = 1`. It does **not** distinguish P from Q because the scalar
-  connection mass does not retain the cardinality composition producing it.
-* Only `(chi, P^EE)` **jointly** single out **Q** = `(e3, Z=1)`.
+Mean ± std over ten seeds; 450 gadgets, `m=4`, width 64, one layer.
 
-The Q-neighbour carries the true class of `v` in its feature; the P-type and
-R-type neighbours are decoys with random classes; `v` and the size-3 fillers
-are neutral. Recovering `y_v` therefore benefits from identifying Q among the
-decoys. Within the normalized `(P^EE, chi)` factorization, Q is identifiable
-from the joint signature, but not from either quantity alone.
+| Model | Accuracy | Δ vs A |
+|---|---|---|
+| MLP | 54.2 ± 2.1 | |
+| Clique-GCN | 63.5 ± 3.8 | |
+| Clique-GIN | 63.3 ± 3.5 | |
+| AllDeepSets (mean) | 54.9 ± 0.0 | |
+| A: EN | 62.7 ± 4.0 | — |
+| B: EE | 68.1 ± 2.9 | +5.5 |
+| C: EN + χ^EE | 61.1 ± 3.6 | −1.6 |
+| **D: EE-Pattern** | **80.1 ± 3.1** | **+17.4** |
+| E: EE-Pattern, shuffled χ | 68.1 ± 3.2 | +5.4 |
+| F: WE | 75.8 ± 3.1 | +13.1 |
+| G: WE-Pattern | 80.0 ± 2.5 | +17.3 |
+| H: WE-Pattern, shuffled χ | 75.7 ± 2.8 | +13.0 |
 
-`P` and `R` are *both* required: drop `P` and `chi` becomes unnecessary
-(R is then separable by `P^EE` alone); drop `R` and `P^EE` becomes unnecessary
-(P is then separable by `chi` alone). The triple is the minimal gadget in which
-neither ingredient is redundant.
+**Reading.** Neither ingredient is individually strong: `P^EE` alone gives
++5.5, and `χ^EE` alone, attached to the EN kernel, is not merely unhelpful
+but slightly harmful (−1.6). Their combination gives +17.4, and shuffling
+`χ^EE` collapses D back to roughly the kernel-only level. `D` and `G` land
+almost exactly together (80.1 vs 80.0) — a direct empirical illustration of
+the pair-level information equivalence between the two Pattern layers.
+
+The gadget is *not* neutral with respect to WE: Q is the only neighbour
+with `c_vu = 2`, and `P^WE = c_vu / s_H(v)` is exactly the kernel that
+retains multiplicity. The pure WE layer (F) reaches +13.1 with no
+descriptor at all — the discrimination the EE paradigm can only perform
+jointly, the WE kernel performs on its own.
+
+## Experiment 5: the WE gadget (`pqr_we.py`)
+
+The mirror construction. `Q`: two size-3 hyperedges; `P`-decoys: two size-4
+hyperedges each; `R`-decoys: one size-3 hyperedge each.
+
+| neighbour | construction | `c_vu` | `Z^EE_vu` |
+|---|---|---|---|
+| **P** | two size-4 hyperedges | 2 | 2/3 |
+| **Q** | two size-3 hyperedges | 2 | 1 |
+| **R** | one size-3 hyperedge | 1 | 1/2 |
+
+`P^WE` (via `c_vu`) collapses Q with P; `χ^WE` collapses Q with R; only the
+pair singles out Q. Symmetrically, `Z^EE` is distinct for all three types,
+so `P^EE` alone identifies Q — the mirror of experiment 4.
+
+`K := max_e |e| = 4` here, resolved automatically.
+
+At `m=4`, Q carries only `P^WE(v,u_Q) = 2/36 ≈ 5.6%` of the aggregation
+mass, against `1/10 = 10%` in the EE gadget. The `m=2` control matches this
+share exactly (`2/20 = 10%`).
+
+### Results, `m=4` (as specified)
+
+| Model | Accuracy | Δ vs A |
+|---|---|---|
+| MLP | 54.4 ± 1.3 | |
+| Clique-GCN | 65.2 ± 2.7 | |
+| Clique-GIN | 62.7 ± 4.3 | |
+| AllDeepSets (mean) | 54.9 ± 0.0 | |
+| A: EN | 55.9 ± 3.2 | — |
+| B: EE | 72.7 ± 7.1 | +16.7 |
+| C: EN + χ^EE | 54.9 ± 0.0 | −1.1 |
+| D: EE-Pattern | 73.6 ± 10.4 | +17.7 |
+| E: EE-Pattern, shuffled χ | 68.2 ± 9.4 | +12.3 |
+| F: WE | 63.8 ± 6.5 | +7.9 |
+| G: WE-Pattern | 65.3 ± 12.9 | +9.4 |
+| H: WE-Pattern, shuffled χ | 60.5 ± 7.0 | +4.6 |
+
+At this dilution, `C` collapses to the majority-class predictor
+(54.9 ± 0.0), essentially indistinguishable from `A` — `χ^EE` confuses Q
+with R here just as EN does. The intended super-additivity on the WE side
+is present in direction (`G > F > H`), but the `G − F` gap (+1.5) sits well
+inside a standard deviation of 12.9 and is not established at this
+dilution.
+
+### Results, `m=2` (dilution-matched control)
+
+| Model | Accuracy | Δ vs A |
+|---|---|---|
+| MLP | 54.0 ± 0.0 | |
+| Clique-GCN | 75.3 ± 4.7 | |
+| Clique-GIN | 69.6 ± 3.8 | |
+| AllDeepSets (mean) | 54.0 ± 0.0 | |
+| A: EN | 70.3 ± 3.4 | — |
+| B: EE | 85.6 ± 4.1 | +15.3 |
+| C: EN + χ^EE | 73.7 ± 7.1 | +3.5 |
+| D: EE-Pattern | 87.7 ± 2.3 | +17.4 |
+| E: EE-Pattern, shuffled χ | 86.5 ± 2.0 | +16.3 |
+| F: WE | 74.9 ± 2.8 | +4.6 |
+| **G: WE-Pattern** | **90.9 ± 1.5** | **+20.6** |
+| H: WE-Pattern, shuffled χ | 72.4 ± 6.8 | +2.1 |
+
+**Reading.** At matched dilution the mirror closes cleanly. `P^WE` alone
+adds +4.6; its shuffled control falls *further*, to +2.1, rather than
+merely matching F (suggesting the shuffled descriptor mildly interferes
+rather than being wholly neutral); the combination reaches +20.6 — the
+same shape of super-additivity as the +17.4 of experiment 4, and by a
+paired test across seeds, G is significantly above both F and H (p<0.005).
+This is the single clearest piece of evidence in either gadget that the WE
+factorization is not redundant with the EE one. Symmetrically, `E ≈ D`
+here (86.5 vs 87.7): given `P^EE`, `χ^EE` is close to inert, because
+`Z^EE` already identifies Q on its own.
 
 ## Models
 
-The same nine models as the benchmark (from `eompp.node_models`, unchanged):
-MLP, Clique-GCN, Clique-GIN, the mean-normalized AllDeepSets-style variant, and
-the EO ablations EO-A..E. EO-E is EO-D evaluated on globally shuffled `chi`
-(the negative control).
-
-## Results
-
-Test accuracy (%), mean +/- std. Config: `m_decoys = 4`, 450 gadgets
-(7 200 nodes), hidden 64, **1 layer**, 10 seeds.
-
-|           Model           |     Accuracy     |       Δ over EO-A        |
-|---------------------------|------------------|--------------------------|
-|            MLP            |   54.2 +/- 2.1   |        - (chance)        |
-|        Clique-GCN         |   63.5 +/- 3.8   |          floor           |
-|        Clique-GIN         |   63.3 +/- 3.5   |          floor           |
-|AllDeepSets (mean variant) |   54.9 +/- 0.0   | majority-class predictor |
-| EO-A: uniform EO baseline |   62.5 +/- 3.9   |           0.0            |
-|      EO-B: P^EE only      |   68.1 +/- 3.2   |         **+5.6**         |
-|      EO-C: chi only       |   64.2 +/- 4.6   |         **+1.7**         |
-|   **EO-D: EO-Pattern**    | **79.5 +/- 3.0** |         **+17.0**        |
-|    EO-E: shuffled chi     |   68.6 +/- 3.5   |         (≈ EO-B)         |
-
-### Reading the results
-
-* **The interaction effect is the headline.** `P^EE` alone adds +5.6; `chi`
-  alone adds only marginally (+1.7); together they add **+17.0**. The descriptor
-  is substantially more useful in conjunction with `P^EE` than as a standalone
-  ingredient. This is exactly the regime no other experiment reaches.
-* **The EO-E control behaves as expected.** Shuffling `chi` collapses EO-D
-  back to the `P^EE`-only level (68.6 ≈ EO-B 68.1), showing that the gain of
-  EO-D depends on the unshuffled structured descriptor rather than merely on
-  its additional input dimension. However, the global shuffle also changes
-  local descriptor distributions and may disrupt descriptor symmetry, so it
-  does not isolate the effect of the pairwise assignment alone.
-* **Contrast with the real benchmark.** In co-citation, the structured
-  organization of `chi` provides no observable benefit; here `chi` provides
-  little benefit alone but becomes decisive in combination with `P^EE`. The two
-  results are consistent: its usefulness depends on alignment with the task.
-
-### Honest caveat
-
-The uniform EO floor sits at approximately 63 %, rather than at chance, because
-the Q-neighbour always carries the true class, so uniform aggregation retains a
-weak component of the informative signal. The relevant comparison is therefore
-the gap between EO-D and the ablations, not the absolute accuracy level.
-Conversely, because the full layer still aggregates Q together with the decoys
-and fillers instead of selecting it deterministically, EO-D reaches 79.5 %,
-rather than 100 %.
-
-This experiment demonstrates that the combination can be genuinely useful
-within the normalized `(P^EE, chi)` decomposition; it does not claim the
-combination is necessary in general or on real data: the benchmark already shows
-it is not, for co-citation.
+The same twelve models as the benchmark (from `eompp.node_models`,
+unchanged): MLP, Clique-GCN, Clique-GIN, AllDeepSets, and the eight-variant
+A–H ladder.
 
 ## Files
 
-|                File                |                                     Purpose                                      |
-|------------------------------------|----------------------------------------------------------------------------------|
-|              `pqr.py`              | P/Q/R generator + target-only split + driver (the only experiment-specific code) |
-|   `results_complementarity.json`   |                        results (per-seed scores included)                        |
-| `requirements_complementarity.txt` |                    pure PyTorch + NumPy + SciPy (no TopoNetX)                    |
+| File | Purpose |
+|---|---|
+| `pqr.py` | EE gadget generator + target-only split + driver |
+| `pqr_we.py` | WE gadget generator + target-only split + driver |
+| `results_complementarity.json` | EE gadget results (per-seed scores included) |
+| `results_complementarity_we.json` | WE gadget results, `m=4` (per-seed scores included) |
+| `results_complementarity_we_m2.json` | WE gadget results, `m=2` dilution control |
 
-The EO quantities, the nine models and the train/eval routines all come from
-the shared `eompp` package - see the root README. This folder no longer carries
-copies of `data_*` / `models_*` / `experiment_*`.
+The random-walk quantities, the twelve models, and the train/eval routines
+all come from the shared `eompp` package — see the root README.
 
 ## How to run
-
-Use a new output filename so that the resumable driver runs all seeds instead
-of reusing the committed canonical results.
 
 ```bash
 pip install -e ..                              # installs the eompp package
 
-# canonical configuration (reproduces the table above)
-python pqr.py --n-gadgets 450 --m-decoys 4 --n-seeds 10 --n-layers 1 \
-    --out reproduced_results_complementarity.json
-# alternative number of decoys
-python pqr.py --m-decoys 6
+# EE gadget (reproduces the table above)
+python pqr.py --n-gadgets 450 --m-decoys 4 --n-seeds 10 --n-layers 1
+
+# WE gadget, both dilutions
+python pqr_we.py --n-gadgets 450 --m-decoys 4 --n-seeds 10
+python pqr_we.py --n-gadgets 450 --m-decoys 2 --n-seeds 10 \
+    --out results_complementarity_we_m2.json
 
 # inspect the gadget signatures without training
 python -c "from pqr import make_pqr_dataset, check_signatures; \
 check_signatures(make_pqr_dataset(n_gadgets=5))"
 ```
 
-The hypergraph, labels, and node features are generated once using `seed=12345`
-and remain fixed across runs. Each run seed controls the train/val/test split,
-model initialisation, and dropout masks; for EO-E, it also controls the global
-permutation of `chi`.
-
-`check_signatures` prints the `(cardinality, Z)` signatures of the first
-target's neighbourhood; with `m_decoys = k` it should report
-`{(2, 1.0): k, (3, 1.0): 1, (3, 0.5): 2k+2}` - confirming P = (e2, 1),
-Q = (e3, 1), R = (e3, 1/2), with the extra `(3, 0.5)` entries being the neutral
-size-3 fillers, which share R's signature and only dilute.
+The hypergraph, labels, and node features are generated once using
+`seed=12345` and remain fixed across runs. Each run seed controls the
+train/val/test split, model initialization, and dropout masks; for the
+shuffled-control variants, it also controls the global permutation of `χ`.

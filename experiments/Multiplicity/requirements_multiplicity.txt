@@ -1,0 +1,2 @@
+# Install the shared core (numpy, scipy, torch come with it):
+-e ..

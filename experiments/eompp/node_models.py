@@ -2,7 +2,7 @@
 eompp.node_models
 =================
 
-The nine node-classification models shared by the Benchmark and
+The twelve node-classification models shared by the Benchmark and
 Complementarity experiments.  Every model maps node features X to per-node
 class logits:
 
@@ -12,11 +12,18 @@ class logits:
   * Clique-GCN     : GCN on the clique expansion (graph baseline).
   * Clique-GIN     : GIN on the clique expansion (graph baseline).
   * AllDeepSets    : in-house mean-normalized Deep Sets-style baseline.
-  * EOPatternNet   : the proposed model; (use_pee, use_chi) select the
-                     ablation variant
-                         A: -/-   B: pee/-   C: -/chi   D: pee/chi
-                     E is variant D evaluated on permuted chi (handled in
-                     eompp.node_training.shuffled_chi).
+  * RWPatternNet   : the proposed model; (kernel, chi_mode) select the
+                     paradigm and the ablation variant
+
+                         A: EN / -        E: EE / EE, shuffled
+                         B: EE / -        F: WE / -
+                         C: EN / EE       G: WE / WE
+                         D: EE / EE       H: WE / WE, shuffled
+
+                     A-E reproduce the ablation ladder of the submitted
+                     thesis (A = uniform baseline, D = EO-Pattern);
+                     F-H add the weighted-edges paradigm.  Shuffling is
+                     handled in eompp.node_training.shuffled_chi.
 
 All models share dropout and a fixed hidden width for a fair comparison.
 """
@@ -25,7 +32,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from eompp.layers import (GCNLayer, GINLayer, AllDeepSetsLayer,
-                          EOPatternLayer)
+                          RWPatternLayer)
 
 
 # --------------------------------------------------------------------------
@@ -102,27 +109,35 @@ class AllDeepSetsNet(nn.Module):
 
 
 # --------------------------------------------------------------------------
-# The proposed model: EO-Pattern.
+# The proposed model: a random-walk-induced layer stack.
 # --------------------------------------------------------------------------
-class EOPatternNet(nn.Module):
-    """EO-Pattern layer stack + linear classifier."""
+class RWPatternNet(nn.Module):
+    """RWPattern layer stack + linear classifier.
+
+    `kernel` and `chi_mode` are fixed at construction; the corresponding
+    tensors are read from the batch under the keys "p_<kernel>" and
+    "chi_<chi_mode>" (lower case), so a single net class covers all
+    paradigms without duplicating the forward pass.
+    """
 
     def __init__(self, n_features, chi_dim, hidden, n_classes, n_layers=2,
-                 dropout=0.5, use_pee=True, use_chi=True):
+                 dropout=0.5, kernel="EE", chi_mode="EE"):
         super().__init__()
         self.input_proj = nn.Linear(n_features, hidden)
         self.layers = nn.ModuleList(
-            EOPatternLayer(hidden, chi_dim, use_pee, use_chi)
+            RWPatternLayer(hidden, chi_dim, kernel, chi_mode)
             for _ in range(n_layers))
         self.head = nn.Linear(hidden, n_classes)
         self.dropout = dropout
+        self.p_key = "p_" + kernel.lower()
+        self.chi_key = None if chi_mode is None else "chi_" + chi_mode.lower()
 
     def forward(self, batch):
         h = F.dropout(F.relu(self.input_proj(batch["x"])),
                       self.dropout, self.training)
+        chi = None if self.chi_key is None else batch[self.chi_key]
         for layer in self.layers:
-            out = layer(h, batch["edge_index"], batch["p_ee"],
-                        batch["chi"], batch["deg"])
+            out = layer(h, batch["edge_index"], batch[self.p_key], chi)
             h = F.dropout(F.relu(out) + h, self.dropout, self.training)  # residual
         return self.head(h)
 
@@ -130,6 +145,20 @@ class EOPatternNet(nn.Module):
 # --------------------------------------------------------------------------
 # Registry.
 # --------------------------------------------------------------------------
+# name -> (kernel, chi_mode).  Shared with the synthetic experiment so that
+# the ablation ladder is defined exactly once.
+RW_SPECS = {
+    "A: EN":                       ("EN", None),
+    "B: EE":                       ("EE", None),
+    "C: EN + chi^EE":              ("EN", "EE"),
+    "D: EE-Pattern":               ("EE", "EE"),
+    "E: EE-Pattern, shuffled chi": ("EE", "EE"),
+    "F: WE":                       ("WE", None),
+    "G: WE-Pattern":               ("WE", "WE"),
+    "H: WE-Pattern, shuffled chi": ("WE", "WE"),
+}
+
+
 def build_model(name, n_features, chi_dim, n_classes,
                 hidden=128, n_layers=2, dropout=0.5):
     """Instantiate a model by name (see MODEL_SPECS)."""
@@ -143,30 +172,26 @@ def build_model(name, n_features, chi_dim, n_classes,
         return CliqueGNN(kind="gin", **common)
     if name == "AllDeepSets":
         return AllDeepSetsNet(**common)
-    eo = dict(chi_dim=chi_dim, **common)
-    if name == "EO-A: uniform EO baseline":
-        return EOPatternNet(use_pee=False, use_chi=False, **eo)
-    if name == "EO-B: P^EE only":
-        return EOPatternNet(use_pee=True, use_chi=False, **eo)
-    if name == "EO-C: chi only":
-        return EOPatternNet(use_pee=False, use_chi=True, **eo)
-    if name == "EO-D: EO-Pattern (full)":
-        return EOPatternNet(use_pee=True, use_chi=True, **eo)
-    if name == "EO-E: shuffled chi":
-        return EOPatternNet(use_pee=True, use_chi=True, **eo)
+    if name in RW_SPECS:
+        kernel, chi_mode = RW_SPECS[name]
+        return RWPatternNet(chi_dim=chi_dim, kernel=kernel,
+                            chi_mode=chi_mode, **common)
     raise ValueError(f"unknown model name: {name}")
 
 
-# (model name, needs chi shuffling).  First block is the main comparison;
-# the EO-* block is the ablation study.
+# (model name, chi key to shuffle or None).  First block is the main
+# comparison; the lettered block is the ablation study.
 MODEL_SPECS = [
-    ("MLP",                       False),
-    ("Clique-GCN",                False),
-    ("Clique-GIN",                False),
-    ("AllDeepSets",               False),
-    ("EO-A: uniform EO baseline", False),
-    ("EO-B: P^EE only",           False),
-    ("EO-C: chi only",            False),
-    ("EO-D: EO-Pattern (full)",   False),
-    ("EO-E: shuffled chi",        True),
+    ("MLP",                        None),
+    ("Clique-GCN",                 None),
+    ("Clique-GIN",                 None),
+    ("AllDeepSets",                None),
+    ("A: EN",                      None),
+    ("B: EE",                      None),
+    ("C: EN + chi^EE",             None),
+    ("D: EE-Pattern",              None),
+    ("E: EE-Pattern, shuffled chi", "chi_ee"),
+    ("F: WE",                      None),
+    ("G: WE-Pattern",              None),
+    ("H: WE-Pattern, shuffled chi", "chi_we"),
 ]

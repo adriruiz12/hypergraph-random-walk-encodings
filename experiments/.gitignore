@@ -5,3 +5,4 @@ __pycache__/
 results_*_quick.json
 reproduced_results_*.json
 Benchmark/Old/
+*.log

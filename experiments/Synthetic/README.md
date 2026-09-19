@@ -1,13 +1,11 @@
-# Experiment 1 - Synthetic separation (EO-Pattern MPNN)
+# Experiment 1 - Cardinality separation (twin hypergraphs)
 
-Synthetic experiment for the EO-Pattern message passing layer
-(equal-edges kernel `P^EE` used in the Eidi–Otter-inspired construction +
-cardinality descriptor χ).
+Graph-classification experiment for the full EN/EE/WE family.
 
 It answers one question, in a fully controlled setting:
 
-> **Does the EO-Pattern layer detect hyperedge structure that a clique
-> expansion provably destroys?**
+> **Do the EE- and WE-conditioned cardinality descriptors detect hyperedge
+> structure that a clique expansion provably destroys?**
 
 ## The idea
 
@@ -15,76 +13,90 @@ Every example is a *graph-classification* instance. For each random
 **base graph** `G` (built as a union of cliques) we produce **two
 hypergraphs on the same vertex set**:
 
-|    class    | hypergraph |                                   hyperedges                                   |
-|-------------|------------|--------------------------------------------------------------------------------|
-|  0 - "big"  |  `H_big`   |                    the original cliques, one hyperedge each                    |
-| 1 - "small" |  `H_small` |                 each clique replaced by all its pairwise edges                 |
+| class | hypergraph | hyperedges |
+|---|---|---|
+| 0 - "big" | `H_big` | the original cliques, one hyperedge each |
+| 1 - "small" | `H_small` | each clique replaced by all its pairwise edges |
 
 **By construction `clique_expansion(H_big) == clique_expansion(H_small)`**
-(asserted for every twin pair). Node features are shared between twins. Hence
-any model that is a function of the clique expansion alone receives *identical
-input* for the two classes and, since the dataset contains both twins,
-**cannot exceed 50 % accuracy**. The two hypergraphs differ in how the same pairwise support is grouped into
-hyperedges of different cardinalities, which is the distinction exposed by χ. Splitting is by base
-graph, so the 50 %-bound holds inside every split.
+(asserted for every twin pair). Node features are shared between twins and
+constant. Hence any model that is a function of the clique expansion alone,
+or of a row-stochastic aggregation of constant features, receives
+*identical* input for the two classes and, since the dataset contains both
+twins, **cannot exceed 50% accuracy**. The two hypergraphs differ only in
+how the same pairwise support is grouped into hyperedges of different
+cardinalities — the distinction the cardinality descriptors are built to
+expose. Splitting is by base graph, so the 50%-bound holds inside every
+split.
 
-## The models (the ablation grid)
+## The models (the ablation ladder)
 
-Seven models (graph-classification wrappers around the shared `eompp` layers):
+Ten models: two clique-expansion baselines plus the eight-variant ladder
+shared by every experiment in this repository (`eompp.node_models.RW_SPECS`,
+graph-classification wrappers around the shared `eompp` layers).
 
-|          name          |    weights   |      message input       |                              role                              |
-|------------------------|--------------|--------------------------|----------------------------------------------------------------|
-|       Clique-GCN       |   GCN norm   |          `h_u`           |               graph baseline on clique expansion               |
-|       Clique-GIN       |   GIN sum    |          `h_u`           |               graph baseline on clique expansion               |
-| A: uniform EO baseline | uniform mean |        `h_v, h_u`        | same pairwise MPNN skeleton, both hypergraph-derived parts off |
-|  B: EO weights only    |    `P^EE`    |        `h_v, h_u`        |                 does the EO kernel alone help?                 |
-|       C: χ only        | uniform mean |       `h_v, h_u, χ`      |                does the descriptor alone help?                 |
-|  D: EO-Pattern (full)  |    `P^EE`    |       `h_v, h_u, χ`      |                       the proposed layer                       |
-|     E: shuffled χ      |    `P^EE`    | `h_v, h_u, χ` (permuted) |                  is χ's signal real structure?                 |
+| name | weights | message input |
+|---|---|---|
+| Clique-GCN | GCN norm | `h_u` |
+| Clique-GIN | GIN sum | `h_u` |
+| A: EN | uniform mean | `h_v, h_u` |
+| B: EE | `P^EE` | `h_v, h_u` |
+| C: EN + χ^EE | uniform mean | `h_v, h_u, χ^EE` |
+| D: EE-Pattern | `P^EE` | `h_v, h_u, χ^EE` |
+| E: EE-Pattern, shuffled χ | `P^EE` | `h_v, h_u, χ^EE` (permuted) |
+| F: WE | `P^WE` | `h_v, h_u` |
+| G: WE-Pattern | `P^WE` | `h_v, h_u, χ^WE` |
+| H: WE-Pattern, shuffled χ | `P^WE` | `h_v, h_u, χ^WE` (permuted) |
 
 ## Results
 
-Test accuracy, mean ± std over 5 seeds, for the committed run
-(`feature_mode=constant`):
+Test accuracy, mean ± std over **ten** seeds (`feature_mode=constant`):
 
-```
-          Model           |  Accuracy (%) |  Macro-F1 (%) |
---------------------------|---------------|---------------|
-        Clique-GCN        |  50.0 +/- 0.0 | 33.3 +/- 0.0  |
-        Clique-GIN        |  50.0 +/- 0.0 | 33.3 +/- 0.0  |
-  A: uniform EO baseline  |  50.0 +/- 0.0 | 33.3 +/- 0.0  |
-    B: EO weights only    |  50.0 +/- 0.0 | 33.3 +/- 0.0  |
-       C: chi only        | 100.0 +/- 0.0 | 100.0 +/- 0.0 |
-   D: EO-Pattern (full)   | 100.0 +/- 0.0 | 100.0 +/- 0.0 |
-     E: shuffled chi      |  50.0 +/- 0.0 | 33.3 +/- 0.0  |
-```
+| Model | Accuracy (%) | Macro-F1 (%) |
+|---|---|---|
+| Clique-GCN | 50.0 ± 0.0 | 33.3 ± 0.0 |
+| Clique-GIN | 50.0 ± 0.0 | 38.1 ± 7.0 |
+| A: EN | 50.0 ± 0.0 | 33.3 ± 0.0 |
+| B: EE | 50.0 ± 0.0 | 33.3 ± 0.0 |
+| **C: EN + χ^EE** | **100.0 ± 0.0** | **100.0 ± 0.0** |
+| **D: EE-Pattern** | **100.0 ± 0.0** | **100.0 ± 0.0** |
+| E: EE-Pattern, shuffled χ | 50.0 ± 0.0 | 33.3 ± 0.0 |
+| F: WE | 50.0 ± 0.0 | 33.3 ± 0.0 |
+| **G: WE-Pattern** | **100.0 ± 0.0** | **100.0 ± 0.0** |
+| H: WE-Pattern, shuffled χ | 50.0 ± 0.0 | 33.3 ± 0.0 |
 
 Reading of the table:
 
-* **Clique-GCN / GIN / A** at 50 %: any model that only sees the clique
-  expansion is at chance (*by construction*).
-* **B at 50 %**: with the default constant node features every node has the
-  same input, so any row-stochastic aggregation weight (the uniform mean of A
-  *or* `P^EE`) maps constant inputs to constant outputs *regardless of its
-  values* - only χ, consumed by ψ as a feature, can break the node symmetry.
-  Hence A ≡ B ≡ 50 % by construction.
-* **C and D at 100 %**: the cardinality descriptor χ is the only signal
-  available to the layer that separates the classes, and it suffices to do so.
-* **E at 50 %**: permuting χ across edges destroys the signal, so χ's
-  contribution is genuine hypergraph structure, not extra capacity.
+* **Clique-GCN / GIN / A / B / F at 50%**: any model that only sees the
+  clique expansion is at chance by construction. The three kernels *do*
+  differ between twins (`P^EE` and `P^WE` are not equal here), but with
+  constant node features a row-stochastic weight maps a constant input to
+  that same constant regardless of its values — only a quantity entering
+  `ψ` as a feature can break the symmetry.
+* **C, D, G at 100%**: what is provable is *separability*, not the accuracy.
+  For a pair contained in a single clique of size `s`,
+  `χ^EE_vu = χ^WE_vu = c_s` in `H_big` and `c_2` in `H_small`, so the two
+  classes receive disjoint descriptor values and the task is linearly
+  separable on the mean-pooled readout. That the optimizer actually attains
+  100% on all ten seeds is the empirical outcome of the committed run.
+* **E, H at 50%**: permuting `χ` across pairs destroys the signal, so the
+  gain is genuine hypergraph structure, not extra input capacity.
+* **Clique-GIN's macro-F1 (38.1 ± 7.0)** is the one chance-level row not
+  pinned at 33.3: its 50% accuracy is not always reached by collapsing onto
+  a single class. The accuracy bound is unaffected.
 
 ## Files
 
-|             file             |                                 content                                 |
-|------------------------------|-------------------------------------------------------------------------|
-|     `data_synthetic.py`      |            twin-pair dataset generator and base-graph split             |
-|    `models_synthetic.py`     | graph-classification wrappers (pooling + MLP head) over `eompp` layers  |
-|  `experiment_synthetic.py`   | disjoint-union batching, training, multi-seed evaluation, results table |
-|  `results_synthetic.json`    |               results (full config + per-seed accuracies)               |
-| `requirements_synthetic.txt` |                              dependencies                               |
+| file | content |
+|---|---|
+| `data_synthetic.py` | twin-pair dataset generator and base-graph split |
+| `models_synthetic.py` | graph-classification wrappers (pooling + MLP head) over `eompp` layers |
+| `experiment_synthetic.py` | disjoint-union batching, training, multi-seed evaluation, results table |
+| `results_synthetic.json` | results (full config + per-seed accuracies) |
 
-The EO quantities (`P^EE`, χ) and the message-passing layers come from the
-shared `eompp` package - see the root README. 
+The random-walk quantities (`P^EN`, `P^EE`, `P^WE`, `χ^EE`, `χ^WE`) and the
+message-passing layers come from the shared `eompp` package — see the root
+README.
 
 ## Running
 
@@ -96,19 +108,24 @@ python experiment_synthetic.py --quick         # fast sanity check
 python experiment_synthetic.py --feature-mode random
 ```
 
-Each run writes a `results_synthetic*.json` with the full config and per-seed
-accuracies. Defaults live in the `Config` class in `experiment_synthetic.py`.
+`K := max_e |e|` is resolved automatically from the whole dataset (all
+splits are batched into one tensor and must share one `χ` dimension); the
+resolved value is written back into the results file's `config.max_card`.
 
 ## Design notes
 
-* **χ descriptor.** χ_vu is a fixed structural object: a `1/(|e|-1)`-weighted,
-  normalised one-hot histogram over the cardinalities of the hyperedges shared
-  by `v` and `u`. It is *not* learned (all learning happens in the message
-  function ψ that consumes it).
+* **Selection criterion.** `train_one` selects the best checkpoint on
+  `(val accuracy, -val loss)`, not accuracy alone. On this task validation
+  accuracy saturates at 1.0 almost immediately (a linearly-separable
+  problem with margin 1), after which it can never improve strictly again;
+  without the loss tie-break the first, still under-converged model to
+  reach that ceiling would be kept for the rest of training. This affects
+  only how the checkpoint is selected, not what the task is.
 * **Pure PyTorch.** No PyG / DGL. The synthetic graphs are small and a
   self-contained implementation is easier to audit.
 * **Why B at chance is the *right* result.** With constant features it is
-  *provable* that any row-stochastic weight is inert, so the EO-Pattern signal
-  can only enter through χ (the sole ingredient ψ consumes as a feature). That
-  is the clean reason - not a cancellation of `P^EE` on the twins, which does
-  not hold in general.
+  provable that any row-stochastic weight is inert, so the descriptor
+  signal can only enter through `χ` (the sole ingredient `ψ` consumes as a
+  feature). This is the clean structural reason, not a numerical
+  cancellation of `P^EE` (or `P^WE`) between the twins, which does not hold
+  in general — the twins' kernels genuinely differ.

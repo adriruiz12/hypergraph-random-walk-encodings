@@ -1,17 +1,33 @@
 # eompp
 
-**A hypergraph-derived, vertex-centered message-passing layer based on Eidi-Otter-inspired connectivity patterns**
+**Three random-walk-induced, vertex-centered message-passing paradigms on hypergraphs**
 
-This repository contains the surveys, implementation, and experiments developed as part of a BSc thesis project. The project studies how pairwise, vertex-centered message passing can be conditioned directly by hypergraph connectivity patterns, rather than relying only on an unweighted graph projection or on a fully general relational structure.
+This repository contains the surveys, implementation, and experiments developed as part of a
+BSc thesis project and its subsequent extension. The project studies how pairwise,
+vertex-centered message passing can be conditioned directly by hypergraph connectivity
+patterns, rather than relying only on an unweighted graph projection or on a fully general
+relational structure.
 
-The proposed **EO-Pattern** layer combines:
+Three random-walk kernels are placed within a common formal framework:
 
-1. The equal-edges transition kernel `P^EE`, which determines how messages are weighted.
-2. A cardinality descriptor `χ_vu`, which records how adjacent vertices share hyperedges of different sizes.
+| Paradigm | Kernel | Descriptor |
+|---|---|---|
+| **EN** (equal-nodes)    | `P^EN(v,u) = 1/\|N_H(v)\|`     | none (EN mediates no hyperedge) |
+| **EE** (equal-edges)    | `P^EE(v,u) = Z^EE_vu / d_H(v)` | `χ^EE` (1/(\|e\|-1)-weighted)   |
+| **WE** (weighted-edges) | `P^WE(v,u) = c_vu / s_H(v)`    | `χ^WE` (uniformly weighted)     |
+
+The **EE-Pattern** layer (`P^EE` + `χ^EE`) is the **EO-Pattern** model of the submitted
+bachelor's thesis; **EN** is the uniform-aggregation baseline used there; **WE** and
+**WE-Pattern** are new, formalized and evaluated in `docs/Random_Walk_Propagations.pdf`.
 
 ## Guiding question
 
-> Can a pairwise, vertex-centered message-passing layer be conditioned directly by hyperedge connectivity patterns (Eidi & Otter, 2025), rather than relying only on an unweighted graph projection or on a general relational structure (Taha et al., 2025)?
+> Can a pairwise, vertex-centered message-passing layer be conditioned directly by hyperedge
+> connectivity patterns (Eidi & Otter, 2025), rather than relying only on an unweighted graph
+> projection or on a general relational structure (Taha et al., 2025)? And, once EE is placed
+> inside a family of such kernels, is EE's cardinality information genuinely distinct from the
+> multiplicity information a different walk (WE) can extract, or are they two factorizations of
+> the same underlying pairwise structure?
 
 ## Repository structure
 
@@ -19,156 +35,138 @@ The proposed **EO-Pattern** layer combines:
 .
 ├── experiments/
 │   ├── Benchmark/              # Cora and Citeseer co-citation benchmarks
-│   ├── Complementarity/        # P/Q/R complementarity experiment
-│   ├── eompp/                  # Shared implementation of the method and baselines
-│   ├── Synthetic/              # Separation beyond clique expansion
+│   ├── Complementarity/        # P/Q/R complementarity gadgets (EE- and WE-targeted)
+│   ├── Multiplicity/           # 3-uniform multiplicity-separation gadget
+│   ├── Synthetic/              # Cardinality separation beyond clique expansion
+│   ├── eompp/                  # Shared implementation of the three kernels/descriptors and baselines
+│   ├── RESULTS.md              # All result tables with the reading of each experiment
+│   ├── run_all.sh              # Reproduces all five experiments
+│   ├── summarise.py            # Regenerates the results listing from results_*.json
 │   ├── pyproject.toml
 │   └── README.md               # Detailed experimental documentation
 ├── docs/
+│   ├── Random_Walk_Propagations.pdf   # EN/EE/WE note: formalization + five experiments
 │   ├── Survey_of_Random_Walk_Variants_on_Graphs_and_Their_Natural_Lifts_to_Higher_Order_Structures.pdf
 │   ├── Survey_of_higher_order_structures_used_in_graph_learning_and_the_associated_message_passing_frameworks.pdf
 │   └── Updated_TFG_Matemáticas_Public.pdf
 └── README.md
 ```
 
-Each experiment directory contains its own README, executable scripts, dependency file, and committed JSON results.
+Each experiment directory contains its own README, executable scripts, dependency file, and
+committed JSON results.
 
-## EO-Pattern layer
+## The three kernels and descriptors
 
-Let `H = (V, E)` be a hypergraph, let `E(v,u)` be the collection of hyperedges containing both `v` and `u`, with 
-repeated hyperedges counted according to their multiplicity, and let `d_H(v)` be the number of hyperedges of 
-cardinality at least two incident to `v`, also counted with multiplicity. For adjacent vertices `v != u`, define 
-the raw connection mass
-
-```math
-Z_{vu}
-=
-\sum_{e\in\mathcal{E}(v,u)}
-\frac{1}{|e|-1}.
-```
-
-The equal-edges transition probability is
+Let `H = (V, E)` be a hypergraph, let `E(v,u)` be the collection of hyperedges containing both
+`v` and `u` (repeated hyperedges counted with multiplicity), let `d_H(v)` be the number of
+hyperedges of cardinality at least two incident to `v`, and let `c_vu = |E(v,u)|` be the
+co-occurrence multiplicity. Define
 
 ```math
-P^{\mathrm{EE}}(v,u)
-=
-\frac{Z_{vu}}{d_H(v)}.
+Z^{\mathrm{EE}}_{vu} = \sum_{e \in \mathcal{E}(v,u)} \frac{1}{|e|-1},
+\qquad
+s_H(v) = \sum_{e \in \mathcal{E}(v)} (|e|-1).
 ```
 
-For every non-isolated vertex, `P^EE` is row-stochastic. Connections through smaller 
-hyperedges contribute more strongly than connections through larger ones.
-
-The cardinality descriptor is
+The three transition kernels are
 
 ```math
-\chi_{vu}
-=
-\frac{1}{Z_{vu}}
-\sum_{e\in\mathcal{E}(v,u)}
-\frac{1}{|e|-1}\,
-\mathbf{e}_{b(|e|)},
+P^{\mathrm{EN}}(v,u) = \frac{1}{|\mathcal{N}_H(v)|},
+\qquad
+P^{\mathrm{EE}}(v,u) = \frac{Z^{\mathrm{EE}}_{vu}}{d_H(v)},
+\qquad
+P^{\mathrm{WE}}(v,u) = \frac{c_{vu}}{s_H(v)},
 ```
 
-where `e_b(|e|)` is the one-hot vector associated with the cardinality bin of `e`. 
-Cardinalities greater than or equal to the chosen cutoff are placed in the final bin. 
-Thus, `χ_vu` is a fixed structural descriptor, not a learned embedding; the message 
-function learns how to use it.
-
-One layer performs
+all row-stochastic. EE weights each shared hyperedge by the reciprocal of its size; WE weights
+every shared hyperedge equally, so it retains multiplicity but discards individual cardinality;
+EN retains only adjacency. The two structural descriptors are the conditional (posterior)
+distribution of shared-hyperedge cardinality under each walk:
 
 ```math
-m_v^{(\ell+1)}
-=
-\sum_{u\in\mathcal{N}_H(v)}
-P^{\mathrm{EE}}(v,u)\,
-\psi^{(\ell)}
-\left(
-h_v^{(\ell)},
-h_u^{(\ell)},
-\chi_{vu}
-\right),
+\chi^{\mathrm{EE}}_{vu} = \frac{1}{Z^{\mathrm{EE}}_{vu}} \sum_{e \in \mathcal{E}(v,u)} \frac{1}{|e|-1}\, \mathbf{e}_{b(|e|)},
+\qquad
+\chi^{\mathrm{WE}}_{vu} = \frac{1}{c_{vu}} \sum_{e \in \mathcal{E}(v,u)} \mathbf{e}_{b(|e|)},
 ```
+
+fixed structural descriptors, not learned embeddings; the message function learns how to use
+them. One Pattern layer performs
 
 ```math
-h_v^{(\ell+1)}
-=
-\varphi^{(\ell)}
-\left(
-h_v^{(\ell)},
-m_v^{(\ell+1)}
-\right).
+m_v^{(\ell+1)} = \sum_{u \in \mathcal{N}_H(v)} P^X(v,u)\, \psi^{(\ell)}_X\!\left(h_v^{(\ell)}, h_u^{(\ell)}, \chi^X_{vu}\right),
+\qquad
+h_v^{(\ell+1)} = \varphi^{(\ell)}_X\!\left(h_v^{(\ell)}, m_v^{(\ell+1)}\right),
 ```
 
-The implementation in `experiments/eompp/` uses sparse incidence matrices to compute `P^EE` and `χ`, and pure PyTorch for the message-passing layers.
+for `X ∈ {EE, WE}` (the pure EN, EE, WE layers omit `χ`). `docs/Random_Walk_Propagations.pdf`
+proves that, at the pair level and once the cardinality resolution `K ≥ max_e |e|` is exact,
+`(Z^EE_vu, χ^EE_vu)` and `(c_vu, χ^WE_vu)` are mutually invertible: EE-Pattern and WE-Pattern
+carry the same pair information, differing only in vertex normalization (`d_H` vs `s_H`) and in
+how that information is split between the aggregation weight and the message feature. This is
+why the experiments below are organized as mirror pairs.
 
-### Structural properties
-
-- The layer is permutation equivariant.
-- It retains a binned summary of hyperedge cardinalities that an unweighted clique expansion can destroy.
-- For example, when sizes 2 and 3 occupy distinct bins, `H_1 = {{a,b,c}}` and `H_2 = {{a,b},{a,c},{b,c}}` have the same clique expansion but different cardinality descriptors.
-- Explicit pairwise preprocessing scales with `sum_e |e|(|e|-1)`, the number of ordered vertex pairs generated by the hyperedges.
+The implementation in `experiments/eompp/` uses sparse incidence matrices to compute all three
+kernels and both descriptors, and pure PyTorch for the message-passing layers.
 
 ## Models and ablations
 
-The experiments compare the proposed model with feature-only, graph-based, and incidence-based baselines. The EO ablation grid is:
+The experiments compare the three paradigms against feature-only, graph-based, and
+incidence-based baselines, using an eight-variant ablation ladder (defined once in
+`eompp.node_models.RW_SPECS`):
 
-| Variant | Aggregation weights | Uses χ | Purpose |
-|---|---:|---:|---|
-| EO-A | Uniform mean | No | Pairwise EO skeleton without either structural ingredient |
-| EO-B | `P^EE` | No | Equal-edges kernel only |
-| EO-C | Uniform mean | Yes | Cardinality descriptor only |
-| **EO-D** | `P^EE` | Yes | **Full EO-Pattern layer** |
-| EO-E | `P^EE` | Shuffled | Negative control for the structured assignment of χ |
+| Variant | Kernel | Descriptor | Role |
+|---|---|---|---|
+| A | `P^EN` | none | pure EN layer (uniform baseline of the thesis) |
+| B | `P^EE` | none | pure EE layer |
+| C | `P^EN` | `χ^EE` | descriptor isolated from the EE kernel |
+| **D** | `P^EE` | `χ^EE` | **EE-Pattern (the submitted EO-Pattern model)** |
+| E | `P^EE` | shuffled `χ^EE` | negative control for D |
+| F | `P^WE` | none | pure WE layer |
+| **G** | `P^WE` | `χ^WE` | **WE-Pattern** |
+| H | `P^WE` | shuffled `χ^WE` | negative control for G |
 
-Additional baselines include MLP, Clique-GCN, Clique-GIN, and an in-house mean-normalized AllDeepSets-style incidence baseline.
+Additional baselines: MLP (features only), Clique-GCN, Clique-GIN, and an in-house
+mean-normalized AllDeepSets-style incidence baseline.
 
 ## Experiments and results
 
-### 1. Synthetic separation
+Five experiments, organized in mirror pairs, each isolating one axis of hypergraph structure.
+Full tables and per-experiment readings are in
+[`experiments/RESULTS.md`](experiments/RESULTS.md); summary below.
 
-Each example belongs to a twin pair of hypergraphs with identical node features and identical clique expansions, but different hyperedge cardinalities. Therefore, any classifier that only sees the clique expansion receives identical inputs for both classes.
+### 1-2. Cardinality vs. multiplicity separation
 
-For the committed default run with constant node features and five seeds:
+Twin-hypergraph classification (`Synthetic/`) isolates cardinality at fixed multiplicity; the
+3-uniform gadget (`Multiplicity/`) isolates multiplicity at fixed cardinality. Each axis is
+detected only by the ingredient built to detect it:
 
-| Model group | Test accuracy |
-|---|---:|
-| Clique-GCN / Clique-GIN | 50.0% |
-| EO-A / EO-B | 50.0% |
-| EO-C / **EO-D** | 100.0% |
-| EO-E | 50.0% |
-
-This experiment verifies that `χ` can expose hypergraph structure erased by clique expansion. With constant node features, `P^EE` alone is inert because any row-stochastic aggregation maps constant inputs to constant outputs.
-
-### 2. Co-citation benchmark
-
-Node classification is evaluated on the Cora and Citeseer co-citation hypergraphs using 20 independently generated stratified splits.
-
-| Model | Cora accuracy | Citeseer accuracy |
+| Experiment | Kernels alone | Descriptors alone |
 |---|---:|---:|
-| Clique-GCN | **79.9 ± 1.5%** | **73.2 ± 1.4%** |
-| EO-A | 76.2 ± 1.2% | 72.4 ± 1.1% |
-| EO-B | 76.6 ± 1.3% | 72.5 ± 1.1% |
-| EO-C | 76.2 ± 1.5% | 72.6 ± 1.1% |
-| **EO-D** | 76.3 ± 1.4% | 72.5 ± 0.9% |
-| EO-E | 76.6 ± 1.3% | 72.6 ± 1.1% |
+| 1. Cardinality twins | 50.0% (chance) | **100.0%** |
+| 2. Multiplicity gadget | **86.8%** (EE = WE) | 70.4% ≈ EN (inert) |
 
-This is a negative result for `χ` on these datasets: EO-D and EO-E perform essentially identically, and no EO variant improves on Clique-GCN. The benchmark therefore provides no evidence that the structured organization of `χ` is useful for these co-citation tasks.
+### 3. Co-citation benchmark (Cora, Citeseer)
 
-### 3. Complementarity
+All eight variants plus baselines, 20 seeds/dataset. As in the submitted thesis, the ladder is
+flat: EE-Pattern and its shuffled control agree within noise, and Clique-GCN remains the
+strongest single model on Cora. Structural diagnostics in `RESULTS.md` show why: on co-citation
+data, `c_vu = 1` for ~80% of adjacent pairs, so all three kernels collapse onto (almost) the
+same object before the model sees the data.
 
-The P/Q/R construction creates a controlled node-classification problem in which `P^EE` and `χ` each discard different information. Their joint signature identifies the informative neighbour, while neither quantity does so alone.
+### 4-5. Complementarity (P/Q/R gadgets)
 
-For 450 gadgets and ten seeds:
+The EE-targeted gadget (`Complementarity/pqr.py`) and its WE-targeted mirror
+(`Complementarity/pqr_we.py`) each show that the corresponding Pattern layer is
+super-additive (kernel alone + descriptor alone < combination), while the *other* paradigm's
+kernel alone resolves the same task without any descriptor:
 
-| Model | Test accuracy |
-|---|---:|
-| EO-A | 62.5 ± 3.9% |
-| EO-B | 68.1 ± 3.2% |
-| EO-C | 64.2 ± 4.6% |
-| **EO-D** | **79.5 ± 3.0%** |
-| EO-E | 68.6 ± 3.5% |
+| Gadget | Kernel alone | Descriptor alone | Combined (Pattern) |
+|---|---:|---:|---:|
+| 4. EE-targeted | +5.5 | −1.6 | **+17.4** |
+| 5. WE-targeted (matched dilution) | +4.6 | ≈0 | **+20.6** |
 
-The full model gains 17.0 percentage points over EO-A and falls back to approximately the EO-B level when `χ` is shuffled. This demonstrates a regime in which the two structural ingredients are genuinely complementary. It does not establish that this complementarity holds on arbitrary real datasets.
+This demonstrates that complementarity is a property of the chosen factorization, not of the
+hypergraph information itself (see Proposition 9.2 in the note).
 
 ## Installation
 
@@ -189,39 +187,42 @@ The benchmark additionally requires TopoNetX:
 
 ## Reproducing the experiments
 
-Run the following commands from `experiments/` after installation.
-
 ```bash
-# Experiment 1: synthetic separation
-cd Synthetic
-python experiment_synthetic.py
-
-# Experiment 2: co-citation benchmarks
-cd ../Benchmark
-python experiment_benchmark.py --dataset cora --n-seeds 20 \
-  --out reproduced_results_cora.json
-python experiment_benchmark.py --dataset citeseer --n-seeds 20 \
-  --out reproduced_results_citeseer.json
-
-# Experiment 3: complementarity
-cd ../Complementarity
-python pqr.py --n-gadgets 450 --m-decoys 4 --n-seeds 10 \
-  --n-layers 1 --out reproduced_results_complementarity.json
+cd experiments
+./run_all.sh          # runs all five experiments in order
+python summarise.py   # regenerates the results listing from results_*.json
 ```
 
-Use a new output filename when reproducing a committed run. The benchmark driver is resumable and reuses seeds already present in an existing result file.
+See `experiments/README.md` for per-experiment commands and flags.
 
-## Background surveys
+## Background documents
 
-Two surveys provide the theoretical background for the project:
-
-- **Higher-order structures in graph learning:** hypergraphs, simplicial, cellular, and combinatorial complexes; message-passing frameworks; expressivity; oversmoothing; oversquashing; and intrinsic versus relational formulations.
-- **Random-walk variants and higher-order lifts:** Markov-chain foundations, graph random walks, and their extensions to hypergraphs and other higher-order domains.
+- **`docs/Random_Walk_Propagations.pdf`**: formalizes EN, EE, and WE as instances of one
+  message-passing template, introduces the WE-conditioned descriptor `χ^WE`, proves
+  row-stochasticity and the pairwise information equivalence of the two Pattern layers, and
+  reports all five experiments above. It extends the submitted work without modifying the
+  thesis or the presentation delivered at UAB.
+- **Higher-order structures in graph learning:** hypergraphs, simplicial, cellular, and
+  combinatorial complexes; message-passing frameworks; expressivity; oversmoothing;
+  oversquashing; intrinsic versus relational formulations.
+- **Random-walk variants and higher-order lifts:** Markov-chain foundations, graph random
+  walks, and their extensions to hypergraphs and other higher-order domains.
 
 ## References
 
-- Eidi, M., & Otter, N. (2025). *Geometric characterisation of structural and regular equivalences in undirected (hyper)graphs*. arXiv:2512.24961.
-- Taha, D., Chapman, J., Eidi, M., Devriendt, K., & Montúfar, G. (2025). *Demystifying topological message-passing with relational structures: A case study on oversquashing in simplicial message-passing*. ICLR 2025. arXiv:2506.06582.
-- Chien, E., Pan, C., Peng, J., & Milenkovic, O. (2022). *You are AllSet: A Multiset Function Framework for Hypergraph Neural Networks*. ICLR 2022.
-- Carletti, T., Battiston, F., Cencetti, G., & Fanelli, D. (2020). *Random walks on hypergraphs*. Physical Review E, 101(2).
-- Gilmer, J., Schoenholz, S. S., Riley, P. F., Vinyals, O., & Dahl, G. E. (2017). *Neural message passing for quantum chemistry*. ICML 2017.
+- Eidi, M., & Otter, N. (2025). *Geometric characterisation of structural and regular
+  equivalences in undirected (hyper)graphs*. arXiv:2512.24961.
+- Taha, D., Chapman, J., Eidi, M., Devriendt, K., & Montúfar, G. (2025). *Demystifying
+  topological message-passing with relational structures: A case study on oversquashing in
+  simplicial message-passing*. ICLR 2025. arXiv:2506.06582.
+- Coupette, C., Dalleiger, S., & Rieck, B. (2023). *Ollivier-Ricci curvature for hypergraphs: A
+  unified framework*. ICLR 2023.
+- Chien, E., Pan, C., Peng, J., & Milenkovic, O. (2022). *You are AllSet: A Multiset Function
+  Framework for Hypergraph Neural Networks*. ICLR 2022.
+- Carletti, T., Battiston, F., Cencetti, G., & Fanelli, D. (2020). *Random walks on
+  hypergraphs*. Physical Review E, 101(2).
+- Gilmer, J., Schoenholz, S. S., Riley, P. F., Vinyals, O., & Dahl, G. E. (2017). *Neural
+  message passing for quantum chemistry*. ICML 2017.
+- Yadati, N., Nimishakavi, M., Yadav, P., Nitin, V., Louis, A., & Talukdar, P. (2019).
+  *HyperGCN: A new method for training graph convolutional networks on hypergraphs*.
+  NeurIPS 2019.

@@ -5,7 +5,7 @@ experiment_benchmark.py
 Main entry point for the realistic node-classification benchmark
 (Cora, Citeseer co-citation hypergraphs).
 
-The nine models and the train/eval routines live in the shared
+The twelve models and the train/eval routines live in the shared
 `eompp` package; this module only holds the benchmark-specific concerns:
 the configuration, the per-dataset multi-seed driver with resumable
 checkpointing, and the CLI.
@@ -36,7 +36,7 @@ from eompp.node_training import to_tensors, train_one, evaluate, shuffled_chi
 class Config:
     def __init__(self):
         self.datasets = DATASETS
-        self.max_card = 8
+        self.max_card = None      # K := max_e |e|, computed per dataset
         self.use_toponetx = True
         self.hidden = 128
         self.n_layers = 2
@@ -66,7 +66,7 @@ def run_dataset(dataset, cfg, device, model_names=None, prev=None,
     print(f"DATASET: {dataset}")
     print("=" * 74)
 
-    specs = [(n, s) for n, s in MODEL_SPECS
+    specs = [(n, k) for n, k in MODEL_SPECS
              if model_names is None or n in model_names]
 
     data = load_dataset(dataset, max_card=cfg.max_card,
@@ -78,10 +78,13 @@ def run_dataset(dataset, cfg, device, model_names=None, prev=None,
     n_classes = data["n_classes"]
     print(f"nodes={data['n_nodes']}  features={data['n_features']}  "
           f"classes={n_classes}  hyperedges={data['incidence'].shape[1]}  "
-          f"clique-expansion edges={data['edge_index'].shape[1]}")
+          f"clique-expansion edges={data['edge_index'].shape[1]}  "
+          f"K={data['chi_dim'] + 1}")
 
     results = dict(prev) if prev else {}
-    for name, needs_shuffle in specs:
+    results["_meta"] = dict(max_card=data["chi_dim"] + 1)  # resolved K
+
+    for name, shuffle_key in specs:
         # resume: reuse per-seed scores already on disk for this model
         cached = results.get(name, {})
         accs = list(cached.get("acc_per_seed", []))
@@ -106,7 +109,8 @@ def run_dataset(dataset, cfg, device, model_names=None, prev=None,
             test_mask = test_mask.to(device)
             active_test = test_mask & active_mask
 
-            b = shuffled_chi(batch, seed) if needs_shuffle else batch
+            b = (shuffled_chi(batch, shuffle_key, seed)
+                 if shuffle_key else batch)
 
             model = build_model(
                 name, n_features=data["n_features"], chi_dim=data["chi_dim"],

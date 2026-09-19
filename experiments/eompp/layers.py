@@ -9,8 +9,9 @@ head) wrap these same layers.
 
   * GCNLayer / GINLayer  : clique-expansion graph convolutions.
   * AllDeepSetsLayer     : in-house mean-normalized Deep Sets-style layer.
-  * EOPatternLayer       : the proposed EO-Pattern layer; two booleans
-                           (use_pee, use_chi) select the ablation variant.
+  * RWPatternLayer       : the proposed random-walk-induced layer; the pair
+                           (kernel, chi_mode) selects the paradigm and the
+                           ablation variant.
 """
 
 import torch
@@ -124,42 +125,42 @@ class AllDeepSetsLayer(nn.Module):
 
 
 # --------------------------------------------------------------------------
-# The proposed EO-Pattern layer.
+# The proposed random-walk-induced layer.
 # --------------------------------------------------------------------------
-class EOPatternLayer(nn.Module):
-    """One EO-Pattern message passing layer.
+class RWPatternLayer(nn.Module):
+    """One random-walk-induced message passing layer.
 
-        m_v   = sum_{u in N_H(v)}  w_{vu} * psi(h_v, h_u, chi_vu)
+        m_v   = sum_{u in N_H(v)}  P^X(v, u) * psi(h_v, h_u [, chi^Y_vu])
         h_v'  = phi(h_v, m_v)
 
-    with  w_{vu} = P^EE(v, u)        if use_pee else  1 / |N_H(v)|
-    and   psi conditioned on chi_vu  if use_chi.
+    `kernel` in {"EN", "EE", "WE"} selects the transition kernel P^X; it is
+    passed in already evaluated on the edge list, so the layer is agnostic to
+    how it was computed.  `chi_mode` in {None, "EE", "WE"} selects the
+    cardinality descriptor supplied to psi, or None for the pure paradigms.
+    EN admits no descriptor of its own; ("EN", "EE") exists only as an
+    ablation isolating the descriptor from the kernel.
 
-    Both P^EE and the uniform mean are convex combinations, so the two
-    aggregation modes are on the same scale.  Dropout/residual are applied
-    by the wrapping net, not by the layer.
+    All three kernels are row-stochastic, so the aggregation modes are on the
+    same scale.  Dropout/residual are applied by the wrapping net.
     """
 
-    def __init__(self, hidden, chi_dim, use_pee, use_chi):
+    def __init__(self, hidden, chi_dim, kernel, chi_mode):
         super().__init__()
-        self.use_pee = use_pee
-        self.use_chi = use_chi
-        psi_in = 2 * hidden + (chi_dim if use_chi else 0)
+        if kernel not in ("EN", "EE", "WE"):
+            raise ValueError(f"unknown kernel: {kernel}")
+        if chi_mode not in (None, "EE", "WE"):
+            raise ValueError(f"unknown chi_mode: {chi_mode}")
+        self.kernel = kernel
+        self.chi_mode = chi_mode
+        psi_in = 2 * hidden + (chi_dim if chi_mode is not None else 0)
         self.psi = mlp(psi_in, hidden, hidden)
         self.phi = mlp(2 * hidden, hidden, hidden)
 
-    def forward(self, h, edge_index, p_ee, chi, in_deg):
+    def forward(self, h, edge_index, p, chi=None):
         src, tgt = edge_index[0], edge_index[1]
         parts = [h[tgt], h[src]]
-        if self.use_chi:
+        if self.chi_mode is not None:
             parts.append(chi)
-        msg = self.psi(torch.cat(parts, dim=-1))
-
-        if self.use_pee:
-            weight = p_ee.unsqueeze(-1)                      # rows sum to 1
-        else:
-            weight = (1.0 / in_deg[tgt]).unsqueeze(-1)       # uniform mean
-        msg = weight * msg
-
+        msg = p.unsqueeze(-1) * self.psi(torch.cat(parts, dim=-1))
         agg = scatter_sum(msg, tgt, h.size(0))
         return self.phi(torch.cat([h, agg], dim=-1))

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "eompp"
 version = "0.1.0"
-description = "EO-Pattern MPNN - shared experiment core"
+description = "Random-walk-induced message passing on hypergraphs - shared experiment core"
 requires-python = ">=3.9"
 dependencies = ["numpy", "scipy", "torch"]
 

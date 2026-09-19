@@ -32,13 +32,13 @@ decoys with random classes; v and the fillers x_i are neutral.  Recovering y_v i
 easiest by reading Q; weaker models retain a diluted label signal through averaging,
 which explains their non-chance floor.
 
-The shared core (eompp) provides eo_quantities_sparse, the nine models and the
+The shared core (eompp) provides rw_quantities_sparse, the twelve models and the
 train/eval routines; the only experiment-specific code here is the P/Q/R
 generator and the target-only split.
 
 Run
 ---
-    python pqr.py                                 # all nine models, 10 seeds
+    python pqr.py                                 # all twelve models, 10 seeds
     python pqr.py --n-gadgets 450 --m-decoys 4 --n-seeds 10 --n-layers 1
 """
 
@@ -50,7 +50,7 @@ import types
 import numpy as np
 import torch
 
-from eompp.eo import build_incidence_scipy, eo_quantities_sparse
+from eompp.eo import build_incidence_scipy, rw_quantities_sparse
 from eompp.node_models import build_model, MODEL_SPECS
 from eompp.node_training import to_tensors, train_one, evaluate, shuffled_chi
 
@@ -59,7 +59,7 @@ from eompp.node_training import to_tensors, train_one, evaluate, shuffled_chi
 # Generator.
 # --------------------------------------------------------------------------
 def make_pqr_dataset(n_gadgets=800, n_classes=2, m_decoys=2, seed=0,
-                     max_card=8, noise=0.01):
+                     max_card=None, noise=0.01):
     """Build a P/Q/R synthetic hypergraph as a load_dataset-style dict."""
 
     rng = np.random.default_rng(seed)
@@ -81,7 +81,7 @@ def make_pqr_dataset(n_gadgets=800, n_classes=2, m_decoys=2, seed=0,
         label[v] = y
         feat_class[v] = -1
 
-        # Q: the unique (e3, S=1) signature -> two size-3 hyperedges
+        # Q: the unique (e3, Z=1) signature -> two size-3 hyperedges
         uQ = new()
         feat_class[uQ] = y                       # tells the truth
         for _ in range(2):
@@ -105,7 +105,7 @@ def make_pqr_dataset(n_gadgets=800, n_classes=2, m_decoys=2, seed=0,
 
     N = nid
     B = build_incidence_scipy(N, hyperedges)
-    edge_index, p_ee, chi, d_h = eo_quantities_sparse(B, max_card)
+    edge_index, p, chi, d_h = rw_quantities_sparse(B, max_card)
 
     X = np.zeros((N, n_classes), dtype=np.float32)
     for node, c in feat_class.items():
@@ -121,7 +121,7 @@ def make_pqr_dataset(n_gadgets=800, n_classes=2, m_decoys=2, seed=0,
     return dict(
         name="pqr", x=X, y=y, n_nodes=N, n_features=n_classes,
         n_classes=n_classes, incidence=B, edge_index=edge_index,
-        p_ee=p_ee, chi=chi, d_h=d_h, chi_dim=chi.shape[1], targets=targets)
+        p=p, chi=chi, d_h=d_h, chi_dim=chi["EE"].shape[1], targets=targets)
 
 
 # --------------------------------------------------------------------------
@@ -145,20 +145,27 @@ def split_targets(y, targets, seed, fracs=(0.5, 0.25, 0.25)):
 # Sanity check: verify the P/Q/R signatures are exactly as claimed.
 # --------------------------------------------------------------------------
 def check_signatures(data):
-    """Print the (chi-argmax, Z) signatures of the first target's neighbours,
-     to confirm P=(e2,1), Q=(e3,1), R=(e3,.5)."""
+    """Print the (chi-argmax, Z, c) signatures of the first target's
+    neighbours, to confirm P=(e2,1,1), Q=(e3,1,2), R=(e3,.5,1).
+
+    The third coordinate is the co-occurrence multiplicity c_vu seen by the
+    WE kernel; it is reported because it separates Q on its own, whereas
+    (chi^EE, Z) separates Q only jointly.
+    """
 
     src, tgt = data["edge_index"]
     v = int(data["targets"][0])
     mask = tgt == v
     sigs = {}
-    p = data["p_ee"][mask]
-    c = data["chi"][mask].argmax(axis=1) + 2        # cardinality bin -> size
-    Z = p * data["d_h"][v]                          # recover Z up to d_H(v)
-    for card, z in zip(c, np.round(Z, 3)):
-        sigs[(int(card), float(z))] = sigs.get((int(card), float(z)), 0) + 1
+    Z = data["p"]["EE"][mask] * data["d_h"][v]      # recover Z^EE
+    card = data["chi"]["EE"][mask].argmax(axis=1) + 2
+    B = data["incidence"]
+    c_vu = np.asarray((B[v] @ B.T).todense()).ravel()[src[mask]]  # |E(v,u)|
+    for a, z, c in zip(card, np.round(Z, 3), c_vu):
+        key = (int(a), float(z), int(c))
+        sigs[key] = sigs.get(key, 0) + 1
     print(f"[check] target v={v}  d_H={data['d_h'][v]:.0f}  "
-          f"signatures (card, Z) -> count: {sigs}")
+          f"signatures (card, Z^EE, c_vu) -> count: {sigs}")
 
 
 # --------------------------------------------------------------------------
@@ -183,7 +190,8 @@ def run(n_gadgets, n_classes, m_decoys, seeds, hidden, n_layers, dropout,
     print(f"{'Model':<28s} {'Accuracy (%)':>15s}")
     print("-" * 46)
     results = dict(prev) if prev else {}
-    for name, needs_shuffle in MODEL_SPECS:
+    results["_meta"] = dict(max_card=data["chi_dim"] + 1)  # resolved K
+    for name, shuffle_key in MODEL_SPECS:
         cached = results.get(name, {})
         accs = list(cached.get("acc_per_seed", []))
         done = len(accs)
@@ -199,7 +207,8 @@ def run(n_gadgets, n_classes, m_decoys, seeds, hidden, n_layers, dropout,
                 0, torch.tensor(idx, device=device), True)
             train_mask, val_mask, test_mask = mk(tr), mk(va), mk(te)
 
-            b = shuffled_chi(batch, seed) if needs_shuffle else batch
+            b = (shuffled_chi(batch, shuffle_key, seed)
+                 if shuffle_key else batch)
             model = build_model(
                 name, n_features=data["n_features"], chi_dim=data["chi_dim"],
                 n_classes=n_classes, hidden=hidden, n_layers=n_layers,

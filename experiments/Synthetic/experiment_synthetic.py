@@ -5,8 +5,8 @@ experiment_synthetic.py
 Main entry point for the synthetic twin-pair experiment (graph
 classification: big-vs-small hyperedges with identical clique expansion).
 
-The structural quantities (P^EE, chi) come from the shared
-`eompp.eo.eo_quantities_sparse` - the same implementation the node
+The structural quantities (P^EN, P^EE, P^WE, chi^EE, chi^WE) come from the
+shared `eompp.eo.rw_quantities_sparse` - the same implementation the node
 experiments use - so there is one EO formula in the repository.  The
 graph-classification harness (disjoint-union batching, per-graph pooling,
 training loop) is specific to this experiment and lives here.
@@ -25,7 +25,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from eompp.eo import build_incidence_scipy, eo_quantities_sparse
+from eompp.eo import (build_incidence_scipy, rw_quantities_sparse,
+                      KERNELS, CHI_KERNELS)
 from eompp.metrics import macro_f1
 from data_synthetic import make_dataset, split_dataset
 from models_synthetic import build_model, MODEL_SPECS
@@ -43,7 +44,7 @@ class Config:
         self.k_range = (2, 5)            # number of cliques per base graph
         self.size_range = (3, 6)         # clique size range
         self.overlap_max = 2             # max shared vertices between cliques
-        self.max_card = 8                # cardinality bins for the chi descriptor
+        self.max_card = None             # K := max_e |e| over the dataset
         self.data_seed = 0
         self.split_seed = 0
 
@@ -54,8 +55,8 @@ class Config:
         self.weight_decay = 5e-4
         self.max_epochs = 300
         self.patience = 40
-        self.seeds = (0, 1, 2, 3, 4)
-
+        self.seeds = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+        
         # output
         self.results_path = "results_synthetic.json"
 
@@ -66,24 +67,26 @@ class Config:
 def build_batch(examples, max_card):
     """Concatenate a list of examples into a single batched graph."""
 
-    xs, eis, p_list, chi_list, batch_idx, ys = [], [], [], [], [], []
+    xs, eis, batch_idx, ys = [], [], [], []
+    p_lists = {k: [] for k in KERNELS}
+    chi_lists = {k: [] for k in CHI_KERNELS}
     offset = 0
     for gi, ex in enumerate(examples):
         n = ex["n_nodes"]
         B = build_incidence_scipy(n, ex["hyperedges"])
-        edge_index, p_ee, chi, _ = eo_quantities_sparse(B, max_card)
+        edge_index, p, chi, _ = rw_quantities_sparse(B, max_card)
         xs.append(ex["x"])
         eis.append(edge_index + offset)
-        p_list.append(p_ee)
-        chi_list.append(chi)
+        for k in KERNELS:
+            p_lists[k].append(p[k])
+        for k in CHI_KERNELS:
+            chi_lists[k].append(chi[k])
         batch_idx.extend([gi] * n)
         ys.append(ex["label"])
         offset += n
 
     x = torch.tensor(np.concatenate(xs, axis=0), dtype=torch.float32)
     edge_index = torch.tensor(np.concatenate(eis, axis=1), dtype=torch.long)
-    p_ee = torch.tensor(np.concatenate(p_list), dtype=torch.float32)
-    chi = torch.tensor(np.concatenate(chi_list, axis=0), dtype=torch.float32)
     batch = torch.tensor(batch_idx, dtype=torch.long)
     y = torch.tensor(ys, dtype=torch.long)
 
@@ -94,17 +97,24 @@ def build_batch(examples, max_card):
         torch.ones(edge_index.size(1)),
     )
 
-    return dict(x=x, edge_index=edge_index, p_ee=p_ee, chi=chi,
-                in_deg=in_deg, batch=batch, y=y, num_graphs=len(examples))
+    out = dict(x=x, edge_index=edge_index, in_deg=in_deg, batch=batch, y=y,
+               num_graphs=len(examples))
+    for k in KERNELS:
+        out["p_" + k.lower()] = torch.tensor(
+            np.concatenate(p_lists[k]), dtype=torch.float32)
+    for k in CHI_KERNELS:
+        out["chi_" + k.lower()] = torch.tensor(
+            np.concatenate(chi_lists[k], axis=0), dtype=torch.float32)
+    return out
 
 
-def shuffle_chi(batch, seed):
-    """Return a copy of `batch` with chi rows randomly permuted (variant E)."""
+def shuffle_chi(batch, key, seed):
+    """Return a copy of `batch` with the rows of `key` randomly permuted."""
 
     g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(batch["chi"].size(0), generator=g)
+    perm = torch.randperm(batch[key].size(0), generator=g)
     new = dict(batch)
-    new["chi"] = batch["chi"][perm]
+    new[key] = batch[key][perm]
     return new
 
 
@@ -124,7 +134,12 @@ def evaluate(model, batch):
 def train_one(model, train_b, val_b, cfg):
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr,
                            weight_decay=cfg.weight_decay)
-    best_val, best_state, wait = -1.0, None, 0
+    # Selection is on (val accuracy, -val loss).  Accuracy alone saturates
+    # early on separable tasks: once it reaches its maximum it can never
+    # improve strictly again, so the first, still under-converged model to
+    # reach that maximum would be kept for the rest of training.  The loss
+    # tie-break keeps improving the checkpoint after accuracy saturates.
+    best_key, best_state, wait = (-1.0, float("inf")), None, 0
     for _ in range(cfg.max_epochs):
         model.train()
         opt.zero_grad()
@@ -133,8 +148,12 @@ def train_one(model, train_b, val_b, cfg):
         opt.step()
 
         val_acc, _ = evaluate(model, val_b)
-        if val_acc > best_val:
-            best_val = val_acc
+        with torch.no_grad():
+            model.eval()
+            val_loss = float(F.cross_entropy(model(val_b), val_b["y"]))
+        key = (val_acc, -val_loss)
+        if key > best_key:
+            best_key = key
             best_state = {k: v.detach().clone()
                           for k, v in model.state_dict().items()}
             wait = 0
@@ -172,24 +191,36 @@ def run(cfg):
     print("twin clique expansions verified equal by construction "
           "(assert in make_dataset)")
 
-    train_b = build_batch(train_ex, cfg.max_card)
-    val_b = build_batch(val_ex, cfg.max_card)
-    test_b = build_batch(test_ex, cfg.max_card)
-    chi_dim = train_b["chi"].size(1)
+    # K := max_e |e|.  The graphs are batched into one tensor, so the three
+    # splits must share one resolution: the maximum over the whole dataset,
+    # which is the canonical K applied to their disjoint union.
+    max_card = cfg.max_card
+    if max_card is None:
+        max_card = max((len(he) for ex in examples for he in ex["hyperedges"]
+                        if len(he) >= 2), default=2)
+        print(f"cardinality resolution: K = max_e |e| = {max_card} "
+              f"(chi dimension {max_card - 1})")
+    cfg.max_card = max_card             # record the resolved value in cfg,
+                                         # so it is dumped in results_path
+
+    train_b = build_batch(train_ex, max_card)
+    val_b = build_batch(val_ex, max_card)
+    test_b = build_batch(test_ex, max_card)
+    chi_dim = train_b["chi_ee"].size(1)
 
     # train every model over every seed
     results = {}
-    for name, needs_shuffle in MODEL_SPECS:
+    for name, shuffle_key in MODEL_SPECS:
         accs, f1s = [], []
         for seed in cfg.seeds:
             torch.manual_seed(seed)
             np.random.seed(seed)
 
             tr_b, va_b, te_b = train_b, val_b, test_b
-            if needs_shuffle:                       # variant E
-                tr_b = shuffle_chi(train_b, seed)
-                va_b = shuffle_chi(val_b, seed)
-                te_b = shuffle_chi(test_b, seed)
+            if shuffle_key:                         # variants E, H
+                tr_b = shuffle_chi(train_b, shuffle_key, seed)
+                va_b = shuffle_chi(val_b, shuffle_key, seed)
+                te_b = shuffle_chi(test_b, shuffle_key, seed)
 
             model = build_model(name, feat_dim=cfg.feat_dim, chi_dim=chi_dim,
                                 hidden=cfg.hidden, n_layers=cfg.n_layers)
@@ -219,9 +250,10 @@ def run(cfg):
               f"{r['acc_mean'] * 100:8.1f} +/- {r['acc_std'] * 100:4.1f} "
               f"{r['f1_mean'] * 100:8.1f} +/- {r['f1_std'] * 100:4.1f}")
     print("-" * 72)
-    print("Expected pattern: clique-expansion models (Clique-GCN/GIN, A, B)")
-    print("near 50%; chi-based models (C, D) near 100%; shuffled chi (E)")
-    print("collapses back to ~50%, confirming chi carries real structure.")
+    print("Expected pattern: models without a cardinality descriptor")
+    print("(Clique-GCN/GIN, A, B, F) near 50%; chi-based models (C, D, G)")
+    print("near 100%; shuffled chi (E, H) collapses back to ~50%,")
+    print("confirming the descriptors carry real structure.")
 
     out = dict(config=vars(cfg), results=results)
     with open(cfg.results_path, "w") as fh:
